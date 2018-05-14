@@ -166,6 +166,25 @@ public class KafkaFutureTest {
 
     }
 
+    @Test
+    public void name() {
+        final KafkaFutureImpl<String> future = new KafkaFutureImpl<>();
+        final KafkaFuture<KafkaFuture<String>> nestedFuture = future.thenApply(result -> methodThatReturnsFuture(result));
+
+
+
+    }
+
+    @Test
+    public void asdwd() {
+        final KafkaFutureImpl<String> future = new KafkaFutureImpl<>();
+        final KafkaFuture<String> nestedFuture = future.thenCompose(result -> methodThatReturnsFuture(result));
+    }
+
+    private KafkaFuture<String> methodThatReturnsFuture(String s) {
+        return null;
+    }
+
     private KafkaFuture<Integer> failedFuture(String msg) {
         KafkaFuture future = new KafkaFutureImpl();
         future.completeExceptionally(new RuntimeException(msg));

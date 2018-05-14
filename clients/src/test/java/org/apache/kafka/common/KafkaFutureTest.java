@@ -139,6 +139,40 @@ public class KafkaFutureTest {
     }
 
     @Test
+    public void moreTests() {
+        final KafkaFuture<Integer> c1 = KafkaFuture.completedFuture(1);
+
+        // left leg
+        final KafkaFuture<Integer> c2 = c1.thenCompose(val -> KafkaFuture.completedFuture(val + 1));
+        // left feet
+        final KafkaFuture<Integer> c3 = c2.thenCompose(val -> KafkaFuture.completedFuture(val + 1));
+        final KafkaFuture<Integer> f1 = c2.thenCompose(val -> failedFuture("f1"));
+
+        // right leg
+        final KafkaFuture<Integer> f2 = c1.thenCompose(val -> failedFuture("f2"));
+        // right feet
+        final KafkaFuture<Integer> f3 = f2.thenCompose(val -> KafkaFuture.completedFuture(val + 1));
+        final KafkaFuture<Integer> f4 = f2.thenCompose(val -> failedFuture("f4"));
+
+        assertFalse(c1.isCompletedExceptionally());
+        assertFalse(c2.isCompletedExceptionally());
+        assertFalse(c3.isCompletedExceptionally());
+        assertTrue(f1.isCompletedExceptionally());
+        assertTrue(f2.isCompletedExceptionally());
+        assertTrue(f3.isCompletedExceptionally());
+        assertTrue(f4.isCompletedExceptionally());
+
+
+
+    }
+
+    private KafkaFuture<Integer> failedFuture(String msg) {
+        KafkaFuture future = new KafkaFutureImpl();
+        future.completeExceptionally(new RuntimeException(msg));
+        return future;
+    }
+
+    @Test
     public void testThenCompose() throws Exception {
         //todo set language level back to 7 and fix
 

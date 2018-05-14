@@ -16,15 +16,14 @@
  */
 package org.apache.kafka.common.internals;
 
+import org.apache.kafka.common.KafkaFuture;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-
-import org.apache.kafka.common.KafkaFuture;
 
 /**
  * A flexible future which supports call chaining and other asynchronous programming patterns.
@@ -75,7 +74,7 @@ public class KafkaFutureImpl<T> extends KafkaFuture<T> {
         private final BaseFunction<A, KafkaFuture<B>> function;
         private final KafkaFutureImpl<B> future;
 
-        public FutureApplicant(BaseFunction<A, KafkaFuture<B>> function, KafkaFutureImpl<B> future) {
+        FutureApplicant(BaseFunction<A, KafkaFuture<B>> function, KafkaFutureImpl<B> future) {
             this.function = function;
             this.future = future;
         }
@@ -83,18 +82,16 @@ public class KafkaFutureImpl<T> extends KafkaFuture<T> {
         @Override
         public void accept(A a, Throwable exception) {
             if (exception != null) {
-                // sdf
                 future.completeExceptionally(exception);
             } else {
-                    final KafkaFuture<B> res = function.apply(a);
-                    final KafkaFuture<B> wat = res.whenComplete((result, error) -> {
-                        if (error != null) {
-                            future.completeExceptionally(error);
-                        } else {
-                            future.complete(result);
-                        }
-                    });
-                    // todo do we do anything with wat
+                final KafkaFuture<B> b = function.apply(a);
+                b.whenComplete((result, error) -> {
+                    if (error != null) {
+                        future.completeExceptionally(error);
+                    } else {
+                        future.complete(result);
+                    }
+                });
             }
         }
     }

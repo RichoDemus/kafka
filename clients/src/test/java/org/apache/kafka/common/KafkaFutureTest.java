@@ -124,6 +124,47 @@ public class KafkaFutureTest {
         assertTrue(futureAppliedFail.isCompletedExceptionally());
     }
 
+    @Test
+    public void simpleTest() throws Exception{
+        KafkaFutureImpl<String> future = new KafkaFutureImpl<>();
+        final KafkaFuture<String> uppercaseFuture = future.thenCompose(str -> {
+            KafkaFutureImpl<String> future2 = new KafkaFutureImpl<>();
+            future2.complete(str.toUpperCase());
+            return future2;
+        });
+        future.complete("Hello World");
+
+        assertEquals("Hello World", future.get());
+        assertEquals("HELLO WORLD", uppercaseFuture.get());
+    }
+
+    @Test
+    public void testThenCompose() throws Exception {
+        //todo set language level back to 7 and fix
+
+        KafkaFutureImpl<Integer> future = new KafkaFutureImpl<>();
+
+        final KafkaFuture<Integer> doubledFuture = future.thenCompose(val -> KafkaFuture.completedFuture(2 * val));
+        assertFalse(doubledFuture.isDone());
+
+        final KafkaFuture<Integer> tripledFuture = future.thenCompose(val -> KafkaFuture.completedFuture(3 * val));
+        assertFalse(tripledFuture.isDone());
+
+        future.complete(21);
+        assertEquals(Integer.valueOf(21), future.getNow(-1));
+        assertEquals(Integer.valueOf(42), doubledFuture.getNow(-1));
+        assertEquals(Integer.valueOf(63), tripledFuture.getNow(-1));
+
+        KafkaFuture<Integer> quadrupledFuture =  future.thenCompose(val -> KafkaFuture.completedFuture(4 * val));
+        assertEquals(Integer.valueOf(84), quadrupledFuture.getNow(-1));
+
+        KafkaFutureImpl<Integer> futureFail = new KafkaFutureImpl<>();
+        KafkaFuture<Integer> futureAppliedFail = futureFail.thenCompose(val -> KafkaFuture.completedFuture(2 * val));
+        futureFail.completeExceptionally(new RuntimeException());
+        assertTrue(futureFail.isCompletedExceptionally());
+        assertTrue(futureAppliedFail.isCompletedExceptionally());
+    }
+
     private static class CompleterThread<T> extends Thread {
 
         private final KafkaFutureImpl<T> future;

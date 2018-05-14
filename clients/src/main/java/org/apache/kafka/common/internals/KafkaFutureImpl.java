@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -66,6 +67,34 @@ public class KafkaFutureImpl<T> extends KafkaFuture<T> {
                 } catch (Throwable t) {
                     future.completeExceptionally(t);
                 }
+            }
+        }
+    }
+
+    private static class FutureApplicant<A, B> implements BiConsumer<A, Throwable> {
+        private final BaseFunction<A, KafkaFuture<B>> function;
+        private final KafkaFutureImpl<B> future;
+
+        public FutureApplicant(BaseFunction<A, KafkaFuture<B>> function, KafkaFutureImpl<B> future) {
+            this.function = function;
+            this.future = future;
+        }
+
+        @Override
+        public void accept(A a, Throwable exception) {
+            if (exception != null) {
+                // sdf
+                future.completeExceptionally(exception);
+            } else {
+                    final KafkaFuture<B> res = function.apply(a);
+                    final KafkaFuture<B> wat = res.whenComplete((result, error) -> {
+                        if (error != null) {
+                            future.completeExceptionally(error);
+                        } else {
+                            future.complete(result);
+                        }
+                    });
+                    // todo do we do anything with wat
             }
         }
     }
@@ -143,6 +172,12 @@ public class KafkaFutureImpl<T> extends KafkaFuture<T> {
     public <R> KafkaFuture<R> thenApply(BaseFunction<T, R> function) {
         KafkaFutureImpl<R> future = new KafkaFutureImpl<>();
         addWaiter(new Applicant<>(function, future));
+        return future;
+    }
+
+    public <R> KafkaFuture<R> thenCompose(BaseFunction<T, KafkaFuture<R>> function) {
+        KafkaFutureImpl<R> future = new KafkaFutureImpl<>();
+        addWaiter(new FutureApplicant<>(function, future));
         return future;
     }
 

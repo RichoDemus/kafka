@@ -135,7 +135,7 @@ public class KafkaFutureTest {
             }
         });
         final int result = two.get();
-        assertEquals("The futures value should be two", 2, result);
+        assertEquals("The future's value should be two", 2, result);
     }
 
     @Test

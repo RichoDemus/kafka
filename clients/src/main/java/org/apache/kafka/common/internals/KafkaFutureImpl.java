@@ -85,11 +85,14 @@ public class KafkaFutureImpl<T> extends KafkaFuture<T> {
                 future.completeExceptionally(exception);
             } else {
                 final KafkaFuture<B> b = function.apply(a);
-                b.whenComplete((result, error) -> {
-                    if (error != null) {
-                        future.completeExceptionally(error);
-                    } else {
-                        future.complete(result);
+                b.whenComplete(new BiConsumer<B, Throwable>() {
+                    @Override
+                    public void accept(B result, Throwable error) {
+                        if (error != null) {
+                            future.completeExceptionally(error);
+                        } else {
+                            future.complete(result);
+                        }
                     }
                 });
             }

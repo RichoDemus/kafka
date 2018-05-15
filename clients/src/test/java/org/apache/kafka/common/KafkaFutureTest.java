@@ -27,10 +27,11 @@ import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
-import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 /**
  * A unit test for KafkaFuture.
@@ -125,97 +126,84 @@ public class KafkaFutureTest {
     }
 
     @Test
-    public void simpleTest() throws Exception{
-        KafkaFutureImpl<String> future = new KafkaFutureImpl<>();
-        final KafkaFuture<String> uppercaseFuture = future.thenCompose(str -> {
-            KafkaFutureImpl<String> future2 = new KafkaFutureImpl<>();
-            future2.complete(str.toUpperCase());
-            return future2;
+    public void testThenCompose() throws ExecutionException, InterruptedException {
+        final KafkaFuture<Integer> one = KafkaFuture.completedFuture(1);
+        final KafkaFuture<Integer> two = one.thenCompose(new KafkaFuture.BaseFunction<Integer, KafkaFuture<Integer>>() {
+            @Override
+            public KafkaFuture<Integer> apply(Integer integer) {
+                return KafkaFuture.completedFuture(integer + 1);
+            }
         });
-        future.complete("Hello World");
-
-        assertEquals("Hello World", future.get());
-        assertEquals("HELLO WORLD", uppercaseFuture.get());
+        final int result = two.get();
+        assertEquals("The futures value should be two", 2, result);
     }
 
     @Test
-    public void moreTests() {
-        final KafkaFuture<Integer> c1 = KafkaFuture.completedFuture(1);
+    public void testThenComposeMultipleFutures() throws ExecutionException, InterruptedException {
+        final KafkaFuture<Integer> root = KafkaFuture.completedFuture(1);
+        final KafkaFuture<Integer> left = root.thenCompose(new KafkaFuture.BaseFunction<Integer, KafkaFuture<Integer>>() {
+            @Override
+            public KafkaFuture<Integer> apply(Integer integer) {
+                return KafkaFuture.completedFuture(integer + 1);
+            }
+        });
+        final KafkaFuture<Integer> right = root.thenCompose(new KafkaFuture.BaseFunction<Integer, KafkaFuture<Integer>>() {
+            @Override
+            public KafkaFuture<Integer> apply(Integer integer) {
+                return KafkaFuture.completedFuture(integer + 2);
+            }
+        });
 
-        // left leg
-        final KafkaFuture<Integer> c2 = c1.thenCompose(val -> KafkaFuture.completedFuture(val + 1));
-        // left feet
-        final KafkaFuture<Integer> c3 = c2.thenCompose(val -> KafkaFuture.completedFuture(val + 1));
-        final KafkaFuture<Integer> f1 = c2.thenCompose(val -> failedFuture("f1"));
-
-        // right leg
-        final KafkaFuture<Integer> f2 = c1.thenCompose(val -> failedFuture("f2"));
-        // right feet
-        final KafkaFuture<Integer> f3 = f2.thenCompose(val -> KafkaFuture.completedFuture(val + 1));
-        final KafkaFuture<Integer> f4 = f2.thenCompose(val -> failedFuture("f4"));
-
-        assertFalse(c1.isCompletedExceptionally());
-        assertFalse(c2.isCompletedExceptionally());
-        assertFalse(c3.isCompletedExceptionally());
-        assertTrue(f1.isCompletedExceptionally());
-        assertTrue(f2.isCompletedExceptionally());
-        assertTrue(f3.isCompletedExceptionally());
-        assertTrue(f4.isCompletedExceptionally());
-
-
-
+        assertEquals(1, (int)root.get());
+        assertEquals(2, (int)left.get());
+        assertEquals(3, (int)right.get());
     }
 
     @Test
-    public void name() {
-        final KafkaFutureImpl<String> future = new KafkaFutureImpl<>();
-        final KafkaFuture<KafkaFuture<String>> nestedFuture = future.thenApply(result -> methodThatReturnsFuture(result));
+    public void testThenComposeFailingFuture() {
+        final AtomicBoolean didRun = new AtomicBoolean(false);
 
+        KafkaFutureImpl<Integer> failingFuture = new KafkaFutureImpl<>();
+        final KafkaFuture<Integer> result = failingFuture.thenCompose(new KafkaFuture.BaseFunction<Integer, KafkaFuture<Integer>>() {
+            @Override
+            public KafkaFuture<Integer> apply(Integer integer) {
+                didRun.set(true);
+                return KafkaFuture.completedFuture(1);
+            }
+        });
 
-
+        failingFuture.completeExceptionally(new Exception());
+        assertTrue("A future composed from a failing future should fail", result.isCompletedExceptionally());
+        assertFalse("A future composed from a failing future should not run", didRun.get());
     }
 
     @Test
-    public void asdwd() {
-        final KafkaFutureImpl<String> future = new KafkaFutureImpl<>();
-        final KafkaFuture<String> nestedFuture = future.thenCompose(result -> methodThatReturnsFuture(result));
-    }
+    public void testThenComposeChainShouldNotCompleteUntilAllFuturesAreComplete() {
+        KafkaFutureImpl<Integer> firstFuture = new KafkaFutureImpl<>();
+        final KafkaFutureImpl<Integer> secondFuture = new KafkaFutureImpl<>();
 
-    private KafkaFuture<String> methodThatReturnsFuture(String s) {
-        return null;
-    }
+        KafkaFuture<Integer> result = firstFuture.thenCompose(new KafkaFuture.BaseFunction<Integer, KafkaFuture<Integer>>() {
+            @Override
+            public KafkaFuture<Integer> apply(Integer integer) {
+                return secondFuture;
+            }
+        });
 
-    private KafkaFuture<Integer> failedFuture(String msg) {
-        KafkaFuture future = new KafkaFutureImpl();
-        future.completeExceptionally(new RuntimeException(msg));
-        return future;
-    }
+        assertFalse(firstFuture.isDone());
+        assertFalse(secondFuture.isDone());
+        assertFalse(result.isDone());
 
-    @Test
-    public void testThenCompose() throws Exception {
-        //todo set language level back to 7 and fix
+        firstFuture.complete(1);
 
-        KafkaFutureImpl<Integer> future = new KafkaFutureImpl<>();
+        assertTrue(firstFuture.isDone());
+        assertFalse(secondFuture.isDone());
+        assertFalse(result.isDone());
 
-        final KafkaFuture<Integer> doubledFuture = future.thenCompose(val -> KafkaFuture.completedFuture(2 * val));
-        assertFalse(doubledFuture.isDone());
+        secondFuture.complete(1);
 
-        final KafkaFuture<Integer> tripledFuture = future.thenCompose(val -> KafkaFuture.completedFuture(3 * val));
-        assertFalse(tripledFuture.isDone());
-
-        future.complete(21);
-        assertEquals(Integer.valueOf(21), future.getNow(-1));
-        assertEquals(Integer.valueOf(42), doubledFuture.getNow(-1));
-        assertEquals(Integer.valueOf(63), tripledFuture.getNow(-1));
-
-        KafkaFuture<Integer> quadrupledFuture =  future.thenCompose(val -> KafkaFuture.completedFuture(4 * val));
-        assertEquals(Integer.valueOf(84), quadrupledFuture.getNow(-1));
-
-        KafkaFutureImpl<Integer> futureFail = new KafkaFutureImpl<>();
-        KafkaFuture<Integer> futureAppliedFail = futureFail.thenCompose(val -> KafkaFuture.completedFuture(2 * val));
-        futureFail.completeExceptionally(new RuntimeException());
-        assertTrue(futureFail.isCompletedExceptionally());
-        assertTrue(futureAppliedFail.isCompletedExceptionally());
+        assertTrue(firstFuture.isDone());
+        assertTrue(secondFuture.isDone());
+        assertTrue(result.isDone());
     }
 
     private static class CompleterThread<T> extends Thread {

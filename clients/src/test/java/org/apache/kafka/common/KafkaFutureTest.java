@@ -16,18 +16,26 @@
  */
 package org.apache.kafka.common;
 
+import org.apache.kafka.clients.admin.DescribeLogDirsResult;
 import org.apache.kafka.common.internals.KafkaFutureImpl;
+import org.apache.kafka.common.requests.DescribeLogDirsResponse;
 import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.Timeout;
 
+import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.LongAdder;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -126,7 +134,7 @@ public class KafkaFutureTest {
     }
 
     @Test
-    public void testThenCompose() throws ExecutionException, InterruptedException {
+    public void shouldComposeFuture() throws ExecutionException, InterruptedException {
         final KafkaFuture<Integer> one = KafkaFuture.completedFuture(1);
         final KafkaFuture<Integer> two = one.thenCompose(new KafkaFuture.BaseFunction<Integer, KafkaFuture<Integer>>() {
             @Override
@@ -139,7 +147,7 @@ public class KafkaFutureTest {
     }
 
     @Test
-    public void testThenComposeMultipleFutures() throws ExecutionException, InterruptedException {
+    public void shouldComposeMultipleFutures() throws ExecutionException, InterruptedException {
         final KafkaFuture<Integer> root = KafkaFuture.completedFuture(1);
         final KafkaFuture<Integer> left = root.thenCompose(new KafkaFuture.BaseFunction<Integer, KafkaFuture<Integer>>() {
             @Override
@@ -154,13 +162,13 @@ public class KafkaFutureTest {
             }
         });
 
-        assertEquals(1, (int)root.get());
-        assertEquals(2, (int)left.get());
-        assertEquals(3, (int)right.get());
+        assertEquals(1, (int) root.get());
+        assertEquals(2, (int) left.get());
+        assertEquals(3, (int) right.get());
     }
 
     @Test
-    public void testThenComposeFailingFuture() {
+    public void shouldNotCallComposedFutureOnFailure() {
         final AtomicBoolean didRun = new AtomicBoolean(false);
 
         KafkaFutureImpl<Integer> failingFuture = new KafkaFutureImpl<>();
@@ -178,7 +186,7 @@ public class KafkaFutureTest {
     }
 
     @Test
-    public void testThenComposeChainShouldNotCompleteUntilAllFuturesAreComplete() {
+    public void shouldNotCompleteUntilAllComposedFuturesInChainAreComplete() {
         KafkaFutureImpl<Integer> firstFuture = new KafkaFutureImpl<>();
         final KafkaFutureImpl<Integer> secondFuture = new KafkaFutureImpl<>();
 
@@ -205,6 +213,108 @@ public class KafkaFutureTest {
         assertTrue(secondFuture.isDone());
         assertTrue(result.isDone());
     }
+
+    @Test
+    public void name() throws ExecutionException, InterruptedException {
+        final KafkaFuture<Collection<Node>> describeCluster = new KafkaFutureImpl<>();
+        final Map<Integer, KafkaFuture<Map<String, DescribeLogDirsResponse.LogDirInfo>>> describeLogDirsFuture = logDirsFutures();
+        final DescribeLogDirsResult describeLogDirsResult = new DescribeLogDirsResult(describeLogDirsFuture);
+
+        final KafkaFuture<Map<Integer, Map<String, DescribeLogDirsResponse.LogDirInfo>>> describeDirs = describeCluster.thenCompose(nodes -> {
+            System.out.println("nodes: " + nodes);
+            return describeLogDirsResult.all();
+        });
+
+
+        //noinspection Duplicates
+        final KafkaFuture<Long> resultFuture = describeDirs.thenApply(result -> {
+//            adminClient.close();
+            final LongAdder size = new LongAdder();
+            result.forEach((key, logDirInfoMap) -> {
+                logDirInfoMap.forEach((key2, logDirInfo) -> {
+                    logDirInfo.replicaInfos.forEach((topicPartition, replicaInfo) -> {
+                        if (topicPartition.topic().equalsIgnoreCase("Topic A")) {
+                            size.add(replicaInfo.size);
+                        }
+                    });
+                });
+            });
+            return size.longValue();
+        });
+
+
+        doIn(() -> describeCluster.complete(nodes()), Duration.ofSeconds(2L));
+        doIn(() -> completeLogDirFutures(describeLogDirsResult), Duration.ofSeconds(4));
+
+        final long result = resultFuture.get();
+        assertEquals(21, result);
+
+    }
+
+    private Map<Integer, KafkaFuture<Map<String, DescribeLogDirsResponse.LogDirInfo>>> logDirsFutures() {
+        Map<Integer, KafkaFuture<Map<String, DescribeLogDirsResponse.LogDirInfo>>> result = new HashMap<>();
+        result.put(0, new KafkaFutureImpl<>());
+        result.put(1, new KafkaFutureImpl<>());
+        return result;
+    }
+
+    private void completeLogDirFutures(DescribeLogDirsResult describeLogDirsResult) {
+        final Map<String, DescribeLogDirsResponse.LogDirInfo> broker1 = new HashMap<>();
+
+
+        Map<TopicPartition, DescribeLogDirsResponse.ReplicaInfo> broken1ReplicaInfo = new HashMap<>();
+        broken1ReplicaInfo.put(new TopicPartition("Topic A", 0), new DescribeLogDirsResponse.ReplicaInfo(10, 10, false));
+        broken1ReplicaInfo.put(new TopicPartition("Topic B", 0), new DescribeLogDirsResponse.ReplicaInfo(10, 10, false));
+        broker1.put("Topic A", new DescribeLogDirsResponse.LogDirInfo(null, broken1ReplicaInfo));
+        describeLogDirsResult.values().get(0).complete(broker1);
+
+        final Map<String, DescribeLogDirsResponse.LogDirInfo> broker2 = new HashMap<>();
+
+        Map<TopicPartition, DescribeLogDirsResponse.ReplicaInfo> broken2ReplicaInfo = new HashMap<>();
+        broken2ReplicaInfo.put(new TopicPartition("Topic A", 0), new DescribeLogDirsResponse.ReplicaInfo(11, 10, false));
+        broken2ReplicaInfo.put(new TopicPartition("Topic B", 0), new DescribeLogDirsResponse.ReplicaInfo(12, 10, false));
+        broker2.put("Topic A", new DescribeLogDirsResponse.LogDirInfo(null, broken2ReplicaInfo));
+        describeLogDirsResult.values().get(1).complete(broker2);
+    }
+
+    private Collection<Node> nodes() {
+        return Arrays.asList(new Node(0, "host", 1), new Node(1, "host", 1));
+    }
+
+    private Map<Integer, Map<String, DescribeLogDirsResponse.LogDirInfo>> dirInfo() {
+        final Map<Integer, Map<String, DescribeLogDirsResponse.LogDirInfo>> brokers = new HashMap<>();
+
+        final Map<String, DescribeLogDirsResponse.LogDirInfo> broker1 = new HashMap<>();
+
+        Map<TopicPartition, DescribeLogDirsResponse.ReplicaInfo> broken1ReplicaInfo = new HashMap<>();
+        broken1ReplicaInfo.put(new TopicPartition("Topic A", 0), new DescribeLogDirsResponse.ReplicaInfo(10, 10, false));
+        broken1ReplicaInfo.put(new TopicPartition("Topic B", 0), new DescribeLogDirsResponse.ReplicaInfo(10, 10, false));
+        broker1.put("Topic A", new DescribeLogDirsResponse.LogDirInfo(null, broken1ReplicaInfo));
+
+        final Map<String, DescribeLogDirsResponse.LogDirInfo> broker2 = new HashMap<>();
+        Map<TopicPartition, DescribeLogDirsResponse.ReplicaInfo> broken2ReplicaInfo = new HashMap<>();
+        broken1ReplicaInfo.put(new TopicPartition("Topic A", 1), new DescribeLogDirsResponse.ReplicaInfo(11, 10, false));
+        broken1ReplicaInfo.put(new TopicPartition("Topic B", 1), new DescribeLogDirsResponse.ReplicaInfo(12, 10, false));
+        broker2.put("Topic A", new DescribeLogDirsResponse.LogDirInfo(null, broken2ReplicaInfo));
+
+        brokers.put(0, broker1);
+        brokers.put(1, broker2);
+
+
+        return brokers;
+    }
+
+    private void doIn(Runnable runnable, Duration duration) {
+        new Thread(() -> {
+            try {
+                Thread.sleep(duration.toMillis());
+                runnable.run();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }).start();
+    }
+
 
     private static class CompleterThread<T> extends Thread {
 

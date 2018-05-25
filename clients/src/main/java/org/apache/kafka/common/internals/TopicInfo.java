@@ -17,6 +17,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.LongAdder;
 
+import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static java.util.stream.Collectors.toList;
 
@@ -25,9 +26,9 @@ public class TopicInfo {
 
     public static void main(String[] args) throws ExecutionException, InterruptedException, TimeoutException {
 
-        final KafkaFuture<Long> future = new TopicInfo().getInfo("sta-kafka01-combined01.nix.cydmodule.com:9092");
+        final KafkaFuture<Long> future = new TopicInfo().getInfo("localhost:9092");
 
-        final Long size = future.get();
+        final Long size = future.get(1, MINUTES);
 
         System.out.println("internal store is " + size + " bytes");
     }
@@ -40,10 +41,6 @@ public class TopicInfo {
         // Get a list of brokers
         final KafkaFuture<Collection<Node>> describeCluster = adminClient.describeCluster().nodes();
 
-//        describeCluster.thenApply(asd -> {
-//            System.out.println(asd);
-//            return 1;
-//        });
 
         // Once we have a list of brokers, get the topic/partition info for each broker
         final KafkaFuture<Map<Integer, Map<String, DescribeLogDirsResponse.LogDirInfo>>> describedirsFuture = describeCluster
@@ -68,7 +65,7 @@ public class TopicInfo {
 //                    logger.info("\t\t" + topicPartition);
 //                    logger.info("\t\t\t" + replicaInfo);
 //                    logger.info("{}-{} is {}b", topicPartition.topic(), topicPartition.partition(), replicaInfo.size);
-                        if (topicPartition.topic().equalsIgnoreCase("gaming-fort-fort-internal-store-changelog")) {
+                        if (topicPartition.topic().equalsIgnoreCase("test")) {
                             size.add(replicaInfo.size);
                         }
                     });
